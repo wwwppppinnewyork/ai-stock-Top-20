@@ -1,0 +1,37 @@
+{
+  "weights": {
+    "analyst_profit_yoy": 0.2,
+    "peg": 0.2,
+    "qoq_growth": 0.48,
+    "consecutive_profit_growth_quarters": 0.01,
+    "analyst_net_profit_revision_change": 0.01,
+    "quality": 0.1
+  },
+  "qoq_rules": {
+    "non_full_positive_ratio": 0.8,
+    "quarter_cycle_positive_full_ratio": 1.0
+  },
+  "peg_year_weights": {
+    "fy1": 0.5,
+    "fy2": 0.3,
+    "fy3": 0.2
+  },
+  "profit_yoy_year_weights": {
+    "fy1": 0.5,
+    "fy2": 0.3,
+    "fy3": 0.2
+  },
+  "revision_year_weights": {
+    "fy1": 0.5,
+    "fy2": 0.5
+  },
+  "quality_subweights": {
+    "roe": 0.34,
+    "gross_margin": 0.33,
+    "net_margin": 0.33
+  },
+  "quality_year_weights": {
+    "prior": 0.5,
+    "current": 0.5
+  }
+}

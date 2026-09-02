@@ -1,0 +1,7 @@
+{
+  "mode": "all_a_shares",
+  "a_share_sector": "全部A股",
+  "exclude_st": true,
+  "exclude_delisted": true,
+  "allowed_exchanges": ["SH", "SZ", "BJ"]
+}
