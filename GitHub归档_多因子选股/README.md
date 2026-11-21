@@ -43,3 +43,34 @@ python run_wind_strategy.py
 3. 此后只需双击 `网页.bat` 打开统一研究工作台。可从主页前往公司研究、策略看板、权重设置和全部历史报告；公司研究支持输入六位A股代码或完整 Wind 代码（如 `300308`、`300308.SZ`、`NVDA.O`）。
 
 页面会先从 Wind 读取当前行情、十年年度财务和历史估值，再通过 OpenAI Responses API 按固定结构生成48项答案。API密钥只由本机后端读取，不会发送给浏览器或写入结果缓存。生成结果保存在 `data/research_cache/`。
+
+## XGBoost 机器学习打分（实验模块）
+
+在六因子规则打分之外，新增一个用**同一套原始因子**训练的 XGBoost 横截面模型，用来检验：固定权重之外，非线性关系和因子交互能否带来额外的选股能力。规则打分仍是主输出，XGBoost 只作对照或可选融合。
+
+文件：
+
+- `src/build_xgb_panel.py`：`archive` 每周把 `data/wind/factor_data.csv` 和当周 `output/ranked_stocks.csv` 归档到 `data/history_factors/<交易日>/`（时点正确，只保存当时可得的数据）；`panel` 把所有快照拼成训练面板，并从 Wind 取下一交易日起 5 个交易日的前复权收益作为标签，写入 `data/xgb_panel.csv`。
+- `src/xgboost_model.py`：`--mode backtest` 做滚动样本外评估；`--mode live` 用全部历史训练后给本周候选池打分。
+- `config/xgboost.json`：特征列表、标签周期、滚动窗口、模型超参数、Top N、交易成本、是否与规则打分融合。
+- `requirements-xgboost.txt`：额外依赖（xgboost、pandas、numpy、scipy）。
+
+方法：
+
+1. **特征**：16 个原始因子字段（分析师预测同比 FY1–FY3、PEG FY1–FY3、单季度净利润环比、连续增长季度数、预测变化率 FY1–FY2、上年/当年单季度 ROE、毛利率、净利率）。每期横截面内先做 3 倍 MAD 缩尾，再做排名标准化到 [0, 1]；负 PEG 视为缺失；缺失值保留，由 XGBoost 学习缺失方向。
+2. **标签**：前瞻收益在当期横截面内的百分位排名，剔除市场整体涨跌，只学习选股能力。
+3. **防泄漏**：滚动扩展窗口训练；每期只用该期之前、并隔离 1 期（避免收益窗口重叠）的数据；训练窗口最后 4 期用作早停验证集。
+4. **评估**：样本外 Rank IC、ICIR、IC>0 比例、Top10 扣除双边 0.2% 成本后的收益，与同期规则打分和候选池等权对比；输出特征重要性（gain）。
+
+运行（需要 Wind 终端已登录，并已积累至少约 30 周快照）：
+
+```powershell
+pip install -r requirements-xgboost.txt
+python src/build_xgb_panel.py panel
+python src/xgboost_model.py --mode backtest   # 输出 output/xgb_report.md 等
+python src/xgboost_model.py --mode live       # 输出 output/xgb_ranked_stocks.csv
+```
+
+`run_wind_strategy.py` 每次运行会自动归档当周快照；若已存在训练面板，会顺带输出 XGBoost 排名。该步骤失败不会影响规则打分的主流程。
+
+判断标准：只有当 XGBoost 的样本外 IC 和扣费后收益都稳定高于规则打分时才考虑替换或融合；否则说明增加的模型复杂度没有带来收益，应保留更简单的规则模型。

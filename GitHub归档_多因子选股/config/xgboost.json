@@ -1,0 +1,50 @@
+{
+  "features": [
+    "analyst_profit_yoy_fy1",
+    "analyst_profit_yoy_fy2",
+    "analyst_profit_yoy_fy3",
+    "peg_fy1",
+    "peg_fy2",
+    "peg_fy3",
+    "net_profit_qoq_growth",
+    "consecutive_profit_growth_quarters",
+    "analyst_revision_fy1",
+    "analyst_revision_fy2",
+    "roe_prior",
+    "gross_margin_prior",
+    "net_margin_prior",
+    "roe_current",
+    "gross_margin_current",
+    "net_margin_current"
+  ],
+  "label": {
+    "horizon_trade_days": 5,
+    "type": "cross_sectional_rank"
+  },
+  "walk_forward": {
+    "min_train_snapshots": 26,
+    "embargo_snapshots": 1,
+    "validation_snapshots": 4
+  },
+  "model": {
+    "objective": "reg:squarederror",
+    "n_estimators": 400,
+    "learning_rate": 0.03,
+    "max_depth": 4,
+    "min_child_weight": 20,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "early_stopping_rounds": 50,
+    "random_state": 42
+  },
+  "portfolio": {
+    "top_n": 10,
+    "round_trip_cost": 0.002
+  },
+  "blend": {
+    "enabled": false,
+    "xgb_weight": 0.5,
+    "rule_weight": 0.5
+  }
+}

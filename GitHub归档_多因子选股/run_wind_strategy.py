@@ -48,6 +48,15 @@ try:
     run(ROOT / "src" / "wind_universe.py")
     run(ROOT / "src" / "wind_data.py", "--ai-universe", "data/wind/ai_theme.csv", "--etf-seed", "data/wind/etf_top_holdings.csv", "--sectors", "")
     run(ROOT / "src" / "stock_workflow.py", "--ai-universe", "data/wind/ai_theme.csv", "--etf-holdings", "data/wind/etf_top_holdings.csv", "--factor-data", "data/wind/factor_data.csv", "--config", "config/weights.json", "--top-n", "10", "--output-dir", "output")
+    # XGBoost: archive this week's point-in-time factors (training history), then
+    # score the current pool if a training panel exists.  Optional and non-fatal:
+    # the rule-based ranking above stays the primary output.
+    try:
+        run(ROOT / "src" / "build_xgb_panel.py", "archive")
+        if (ROOT / "data" / "xgb_panel.csv").exists():
+            run(ROOT / "src" / "xgboost_model.py", "--mode", "live")
+    except Exception as xgb_exc:
+        print(f"XGBoost 步骤跳过：{xgb_exc}")
     run(ROOT / "src" / "top20_history.py")
     run(ROOT / "src" / "wind_web_table.py")
     write_status("success")
