@@ -8,7 +8,7 @@ python run_wind_strategy.py
 
 候选池为截至数据日的全部A股（含沪、深、北交所，不含三板），剔除ST、*ST及退市股票，随后运行六因子评分并输出排名。不设置年度涨幅门槛。
 
-所有内容集中在本目录：`config/` 是权重和选股池映射，`src/` 是 Wind 接口、评分和网页脚本，`data/wind/` 是逐步中间数据，`output/` 是最终结果。
+所有内容集中在本目录：`config/` 是权重和选股池映射，`src/` 是 Wind 接口、评分、XGBoost 和回测脚本，`data/wind/` 是逐步中间数据，`output/` 是最终结果。
 
 ## 选股池 Wind 映射
 
@@ -36,13 +36,25 @@ python run_wind_strategy.py
 
 每周最后一个交易日收盘后生成六因子信号，下一交易日调仓并持有至下一周信号。回测净值同样按周计算。
 
-## 研究工作台与AI公司研究（48项清单）
+## 回测
 
-1. 保持 Wind 终端已登录。
-2. 首次使用双击 `设置OpenAI密钥并打开公司研究.bat`，按提示在本机设置 `OPENAI_API_KEY`；可选设置 `OPENAI_MODEL`，默认使用 `gpt-5.6-sol`。
-3. 此后只需双击 `网页.bat` 打开统一研究工作台。可从主页前往公司研究、策略看板、权重设置和全部历史报告；公司研究支持输入六位A股代码或完整 Wind 代码（如 `300308`、`300308.SZ`、`NVDA.O`）。
+- `src/backfill_top20_history.py`：从指定日期起按周回填历史 Top30 排名（每个信号日独立重建股票池并打分），写入 `data/top20_history.csv`。
+- `src/backtest_top30.py`：每年 4 月 30 日、8 月 31 日、10 月 31 日三个时点调仓的回测。
+- `src/backtest_weekly_curve.py`：同样三时点调仓、按周计算净值曲线，扣除双边 0.2% 成本，并与基准对比。
+- `src/top20_history.py`：记录每周 Top30 快照，统计近 6 个月高频入选股票。
 
-页面会先从 Wind 读取当前行情、十年年度财务和历史估值，再通过 OpenAI Responses API 按固定结构生成48项答案。API密钥只由本机后端读取，不会发送给浏览器或写入结果缓存。生成结果保存在 `data/research_cache/`。
+## 文件结构
+
+```text
+run_wind_strategy.py        主流程：股票池 → Wind 取数 → 六因子打分 → XGBoost（可选）→ 历史记录
+config/                     六因子权重、股票池规则、XGBoost 参数
+src/wind_universe.py        构建股票池
+src/wind_data.py            从 Wind 获取因子数据
+src/stock_workflow.py       六因子打分与排名
+src/build_xgb_panel.py      XGBoost 训练面板
+src/xgboost_model.py        XGBoost 模型与样本外评估
+src/backfill_top20_history.py, backtest_*.py, top20_history.py   历史回填与回测
+```
 
 ## XGBoost 机器学习打分（实验模块）
 

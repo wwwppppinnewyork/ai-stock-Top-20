@@ -267,8 +267,6 @@ def main():
             writer.writeheader(); writer.writerows(exclusion_audit)
     if not args.no_publish:
         subprocess.run([sys.executable, str(ROOT / "src" / "top20_history.py")], cwd=ROOT, check=True)
-        subprocess.run([sys.executable, str(ROOT / "src" / "render_dashboard.py")], cwd=ROOT, check=True)
-        subprocess.run([sys.executable, str(ROOT / "src" / "publish_results.py")], cwd=ROOT, check=True)
     print(f"历史回填完成：{history_path}")
 
 

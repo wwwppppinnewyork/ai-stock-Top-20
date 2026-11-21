@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Wind data, outputs and logs are generated locally
+GitHub归档_多因子选股/data/
+GitHub归档_多因子选股/output/
+GitHub归档_多因子选股/logs/

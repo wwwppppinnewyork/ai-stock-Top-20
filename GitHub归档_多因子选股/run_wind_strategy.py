@@ -58,14 +58,7 @@ try:
     except Exception as xgb_exc:
         print(f"XGBoost 步骤跳过：{xgb_exc}")
     run(ROOT / "src" / "top20_history.py")
-    run(ROOT / "src" / "wind_web_table.py")
     write_status("success")
-    run(ROOT / "src" / "render_dashboard.py")
-    run(ROOT / "src" / "publish_results.py")
 except Exception as exc:
     write_status("failed", str(exc))
-    try:
-        run(ROOT / "src" / "render_dashboard.py")
-        run(ROOT / "src" / "publish_results.py")
-    finally:
-        raise
+    raise
