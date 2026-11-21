@@ -101,5 +101,7 @@ What the numbers say:
 - **No leakage**: a placebo run that trains LightGBM on shuffled labels gives a mean out-of-sample IC of -0.001.
 - **The blend and the full strategy inherit the linear score's negative IC.** The validation gate passed in 79% of rebalances, so the strategy kept blending in the losing linear rank. The limit-up pullback pool and the momentum-heavy weights in risk-on periods add further drawdown.
 
+**Timing luck.** The LightGBM figures above come from one rebalance schedule. Rerun on all 20 possible start days, the same strategy (without industry classification) earned between 1.2% and 15.1% a year, median 8.0%, and the schedule used here was the best of the 20. See `multi_factor_strategy/results/timing_tests.md`.
+
 These results come from a broad large/mid-cap universe and may not transfer to the original sector and AI-concept pool on JoinQuant. They do suggest testing, on JoinQuant itself, a higher model weight (or the model alone) and a sign check on the trend and leader factors.
 

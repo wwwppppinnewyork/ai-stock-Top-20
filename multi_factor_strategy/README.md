@@ -57,6 +57,7 @@ src/xgboost_model.py        XGBoost model and out-of-sample evaluation
 src/factor_baselines.py     Linear baselines: z-score, ICIR weighting, WLS regression; model comparison
 src/open_data.py            Free-data panel (BaoStock + AkShare) for running the study without Wind
 src/jq_port_backtest.py     Local port of the JoinQuant 12-factor + LightGBM strategy (see joinquant_lightgbm/)
+src/timing_tests.py         Rebalance-timing tests for the LightGBM strategy (results/timing_tests.md)
 src/backfill_top20_history.py, backtest_*.py, top20_history.py   History backfill and backtests
 ```
 
@@ -144,3 +145,24 @@ Out-of-sample over the 72 months where all three models have weights (the equal-
 | WLS regression (sqrt market cap) | 0.033 | 0.14 | -1.9% | 47% |
 
 Strongest single factors (full sample, descriptive): low volatility (IC 0.065), low turnover (0.059), cash-flow yield (ICIR 0.24) and 1-month reversal; growth factors (revenue and profit growth) had negative IC in this period. Positive rank IC did not translate into a Top50 return clearly above the universe after costs; only the ICIR-weighted composite was ahead, by a margin that is small relative to its month-to-month variation.
+
+## Rebalance timing tests
+
+`src/timing_tests.py` asks how much of the LightGBM top-20 result (local port, no industry classification) depends on the rebalance calendar. Full output: [`results/timing_tests.md`](results/timing_tests.md).
+
+```bash
+python src/timing_tests.py      # about 7 minutes; needs the open-data cache and jq_port_backtest.py download
+```
+
+| Test | Result (historical backtest, net of costs) |
+|---|---|
+| Same strategy started on each of the 20 days of the 20-day cycle, 2019-11 to 2025-12 | Annual return from 1.2% to 15.1%, median 8.0% (CSI All Share 4.4%). The schedule used in the original backtest (offset 7) was the best of the 20 |
+| Signal decay: Rank IC vs forward return | 0.022 at 1 day, 0.037 at 20 days, 0.049 at 60 days: a slow signal |
+| Holding period, staggered sleeves | 5 days -4.4%, 10 days 6.6%, 20 days 6.6% (20 sleeves), 40 days 11.9%, 60 days 6.3% |
+| Daily scoring, sell when rank drops below S | -11.3% (S = 30) to 0.7% (S = 200); turnover costs dominate |
+
+Two lessons:
+
+- **Report the distribution over start days.** Equal-capital staggered sleeves remove the timing luck without adding a parameter.
+- **Make runs reproducible.** The universe was stored in a Python set, so the order of training rows, and therefore LightGBM's bagging samples, changed from run to run. That moved a single schedule's annual return by a median of 4 points. The test now sorts the universe and sets LightGBM to deterministic mode, and repeated runs match exactly. `jq_port_backtest.py` still iterates over the set, so its published figures carry the same run-to-run noise.
+
