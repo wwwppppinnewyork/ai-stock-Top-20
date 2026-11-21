@@ -58,6 +58,7 @@ src/factor_baselines.py     Linear baselines: z-score, ICIR weighting, WLS regre
 src/open_data.py            Free-data panel (BaoStock + AkShare) for running the study without Wind
 src/jq_port_backtest.py     Local port of the JoinQuant 12-factor + LightGBM strategy (see joinquant_lightgbm/)
 src/timing_tests.py         Rebalance-timing tests for the LightGBM strategy (results/timing_tests.md)
+src/beta_tests.py           Beta-constrained portfolio weights with a no-model control (results/beta_tests.md)
 src/backfill_top20_history.py, backtest_*.py, top20_history.py   History backfill and backtests
 ```
 
@@ -166,3 +167,35 @@ Two lessons:
 - **Report the distribution over start days.** Equal-capital staggered sleeves remove the timing luck without adding a parameter.
 - **Make runs reproducible.** The universe was stored in a Python set, so the order of training rows, and therefore LightGBM's bagging samples, changed from run to run. That moved a single schedule's annual return by a median of 4 points. The test now sorts the universe and sets LightGBM to deterministic mode, and repeated runs match exactly. `jq_port_backtest.py` still iterates over the set, so its published figures carry the same run-to-run noise.
 
+## Beta-constrained weights
+
+The equal-weight top 20 is long only with a beta of about 0.85, so most of its return and its
+drawdown come from the market. `src/beta_tests.py` keeps the same model, data, costs and 20 start
+offsets and changes only the weights. Settings were fixed before the run: the model's 100
+best-scored stocks as candidates, 250-day beta against the index, 5% cap per stock (at least 20
+names), fully invested. Full output: [`results/beta_tests.md`](results/beta_tests.md).
+
+```bash
+python src/beta_tests.py        # needs the same cache as timing_tests.py
+```
+
+All 20 offsets combined as equal-capital staggered sleeves, 2019-11 to 2025-12, net of costs:
+
+| Portfolio | Ann. return | Sharpe | Max drawdown | Realized beta (median offset) |
+|---|---|---|---|---|
+| Equal weight top 20 | 7.8% | 0.47 | -42.3% | 0.84 |
+| Max score s.t. beta <= 0.7 (linear program) | 6.6% | 0.46 | -30.7% | 0.67 |
+| Min beta within the model's top 100 | 11.3% | 0.75 | -15.4% | 0.52 |
+| Control: min beta over the whole universe, no model | 10.6% | 0.74 | -16.3% | 0.34 |
+| CSI All Share index | 5.5% | 0.37 | -39.3% | 1.00 |
+
+- **Capping beta at 0.7 lowers risk, not risk-adjusted return.** The drawdown falls by about 11
+  points and the Sharpe ratio is unchanged. The cap was unreachable inside the 100 candidates on
+  19% of rebalance days; those days fall back to the minimum-beta portfolio.
+- **The higher Sharpe ratio comes from low beta, not from the model.** Minimizing beta inside the
+  model's top 100 reaches 0.75, but the control, which ignores the model, reaches 0.74 and varies
+  less across start days (0.65 to 0.82 against 0.42 to 0.91). This is the low-beta anomaly in
+  A-shares. Restricting candidates to the model's picks only raises the attainable minimum beta
+  (median 0.45 against 0.22).
+- **What is left for the model is small.** With beta near the market's, the model's portfolios earn
+  a Sharpe ratio of about 0.46 against 0.37 for the index.

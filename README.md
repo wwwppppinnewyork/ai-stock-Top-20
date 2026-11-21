@@ -11,6 +11,7 @@ Highlights:
 
 - Point-in-time data handling: fundamentals keyed to announcement dates, historical index constituents, non-overlapping label windows.
 - Leakage checks: placebo runs on shuffled labels, ablations of the industry feature, out-of-sample validation gates.
+- Robustness tests: rebalance timing luck across 20 start days, and beta-constrained weights checked against a no-model control (the Sharpe gain came from low beta, not the model).
 - Execution realism: lot sizes (STAR Market 200-share minimum), limit-up / suspension filters, commission and stamp duty.
 
 All performance figures in this repository are historical backtests and are not investment advice.
