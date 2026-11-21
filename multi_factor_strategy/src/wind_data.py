@@ -302,6 +302,7 @@ def main():
             "consensus_year": as_of.year,
             "report_period": report_end.isoformat(),
             "close": fmt(by_field["close"][idx]),
+            "mkt_cap": fmt(market_cap),
             "pct_chg": fmt(by_field["pct_chg"][idx]),
             "analyst_profit_yoy": fmt(growth1),
             "analyst_profit_yoy_fy1": fmt(growth1),

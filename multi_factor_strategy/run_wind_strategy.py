@@ -56,7 +56,14 @@ try:
         if (ROOT / "data" / "xgb_panel.csv").exists():
             run(ROOT / "src" / "xgboost_model.py", "--mode", "live")
     except Exception as xgb_exc:
-        print(f"XGBoost 步骤跳过：{xgb_exc}")
+        print(f"XGBoost step skipped: {xgb_exc}")
+    # Linear baselines (z-score equal weight, ICIR weighted, WLS regression):
+    # separate from XGBoost so they still run when xgboost is not installed.
+    if (ROOT / "data" / "xgb_panel.csv").exists():
+        try:
+            run(ROOT / "src" / "factor_baselines.py", "--mode", "live")
+        except Exception as base_exc:
+            print(f"Baseline step skipped: {base_exc}")
     run(ROOT / "src" / "top20_history.py")
     write_status("success")
 except Exception as exc:

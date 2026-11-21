@@ -1,0 +1,21 @@
+{
+  "reverse_factors": ["peg_fy1", "peg_fy2", "peg_fy3"],
+  "no_winsorize": ["consecutive_profit_growth_quarters"],
+  "icir": {
+    "window_snapshots": 12,
+    "min_snapshots": 8,
+    "embargo_snapshots": 1,
+    "negative_icir": "zero"
+  },
+  "wls": {
+    "window_snapshots": 12,
+    "min_snapshots": 8,
+    "embargo_snapshots": 1,
+    "weight": "sqrt_mkt_cap",
+    "ridge_lambda": 0.1
+  },
+  "portfolio": {
+    "top_n": 10,
+    "round_trip_cost": 0.002
+  }
+}

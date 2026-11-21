@@ -12,8 +12,9 @@ Two jobs:
    trading day after the snapshot so the label never overlaps the features.
 
 Output: ``data/xgb_panel.csv`` with columns
-``snapshot_date, ts_code, name, <features...>, total_score, fwd_return``
-(``total_score`` is the rule-based score of the same week, used as baseline).
+``snapshot_date, ts_code, name, <features...>, total_score, mkt_cap, fwd_return``
+(``total_score`` is the rule-based score of the same week, used as baseline;
+``mkt_cap`` is the regression weight for the WLS baseline).
 """
 import argparse
 import csv
@@ -94,10 +95,11 @@ def build_panel():
             item = {"snapshot_date": snapshot_date, "ts_code": row["ts_code"], "name": row.get("name", "")}
             item.update({f: row.get(f, "") for f in features})
             item["total_score"] = rule_score.get(row["ts_code"], "")
+            item["mkt_cap"] = row.get("mkt_cap", "")  # weight for the WLS baseline
             item["fwd_return"] = round(returns[row["ts_code"]], 6)
             out_rows.append(item)
         print(f"{snapshot_date}: {len(rows)} 只股票，{sum(r['snapshot_date'] == snapshot_date for r in out_rows)} 只有标签")
-    fields = ["snapshot_date", "ts_code", "name", *features, "total_score", "fwd_return"]
+    fields = ["snapshot_date", "ts_code", "name", *features, "total_score", "mkt_cap", "fwd_return"]
     with PANEL_FILE.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()

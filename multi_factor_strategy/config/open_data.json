@@ -1,0 +1,11 @@
+{
+  "panel": "data/open/open_panel.csv",
+  "output_dir": "output/open_data",
+  "features": ["ep", "bp", "sp", "cfp", "size", "mom_12_1", "rev_1m", "low_vol", "low_turn",
+               "roe", "gross_margin", "revenue_yoy", "profit_yoy", "profit_qoq"],
+  "reverse_factors": [],
+  "no_winsorize": [],
+  "icir": {"window_snapshots": 12, "min_snapshots": 8, "embargo_snapshots": 1, "negative_icir": "zero"},
+  "wls": {"window_snapshots": 12, "min_snapshots": 8, "embargo_snapshots": 1, "weight": "sqrt_mkt_cap", "ridge_lambda": 0.1},
+  "portfolio": {"top_n": 50, "round_trip_cost": 0.002}
+}

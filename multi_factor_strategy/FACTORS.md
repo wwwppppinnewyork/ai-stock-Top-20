@@ -99,3 +99,7 @@ The theoretical maximum is still 100 points; the forecast change factor can cont
 ## 5. XGBoost comparison model (experimental)
 
 The XGBoost model uses the same 16 raw factor fields as the rule-based score, but no hand-set weights or piecewise rules: within each snapshot the features are winsorized at 3×MAD and rank-normalized, and a gradient-boosted tree model learns the relationship between the factors and the next-period (5 trading days) relative return rank. Training uses an expanding window with a 1-snapshot embargo, and all evaluation is out of sample. See the "XGBoost ranking model" section of `README.md` for details and `config/xgboost.json` for parameters.
+
+## 6. Linear baselines (experimental)
+
+The same 16 raw factors are also combined by three linear baselines: an equal-weight average of cross-sectional z-scores, a z-score composite weighted by each factor's trailing ICIR, and a cross-sectional weighted regression (weights `sqrt(market cap)`, small ridge penalty) whose trailing average coefficients score the next snapshot. They test whether the hand-set weights above and the XGBoost model beat simple data-driven weights. See the "Linear baselines" section of `README.md` and `config/baselines.json`.
