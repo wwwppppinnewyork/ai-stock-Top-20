@@ -1,5 +1,5 @@
 # ai-stock-Top-20
 
-A 股多因子排序选股模型：以单季度净利润环比增速为核心，结合分析师一致预期、PEG、预测上修与盈利质量六类因子打分，每周输出 Top 排名；另附一个基于同一套因子的 XGBoost 横截面模型，用滚动样本外检验与规则打分对比。
+A multi-factor ranking model for China A-shares. It scores stocks on six factor groups, with single-quarter net profit QoQ growth at the core, plus analyst consensus growth, PEG, forecast revisions and profitability quality, and outputs a weekly Top ranking. An XGBoost cross-sectional model trained on the same factors is included and compared with the rule-based score through walk-forward out-of-sample tests.
 
-数据来自 Wind（WindPy），代码与说明见 [`GitHub归档_多因子选股/`](GitHub归档_多因子选股/)。
+Data comes from Wind (WindPy). Code and documentation are in [`multi_factor_strategy/`](multi_factor_strategy/).

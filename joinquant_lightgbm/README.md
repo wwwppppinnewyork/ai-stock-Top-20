@@ -9,6 +9,7 @@
 | `strategy_lite_lightgbm.py` | Original: sector + AI-concept pool, limit-up pullback entry pool, 50/50 blend, buffer, stock / gold / cash sleeves (described below) |
 | `strategy_1_linear_top20.py` | Strategy 1: linear 12-factor score, top 20 |
 | `strategy_2_lightgbm_top20.py` | Strategy 2: LightGBM only, top 20 (no validation gate, no industry feature) |
+| `strategy_2b_lightgbm_top20_no_industry.py` | Strategy 2b: strategy 2 without industry classification (`g.use_industry = False`) |
 | `strategy_3_blend_top20.py` | Strategy 3: 50/50 blend of LightGBM and linear score with validation gate, top 20 |
 | `strategy_5_equal_weight_csi800.py` | Strategy 5: equal-weight CSI 300 + CSI 500 benchmark, no factors |
 

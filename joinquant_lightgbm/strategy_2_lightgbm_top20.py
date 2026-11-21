@@ -110,6 +110,9 @@ def initialize(context):
     g.rebalance_interval_trading_days = 20
     g.entry_signal_valid_trading_days = 20
     g.max_single_stock_weight = 0.12
+    g.cash_reserve = 0.005           # cash kept back for fees when sizing orders
+    g.retry_cash_threshold = 0.03    # between rebalances, buy missing targets when cash exceeds 3%
+    g.current_target_weights = {}
 
     # ---- 四核打分 ----
     g.trend_neutral_weak = 0.75
@@ -166,6 +169,8 @@ def initialize(context):
     g.buffer_sell_rank = 20       # 设成与买入名次相同 = 不设缓冲区（原版40）
     g.rebalance_tolerance = 0.0   # 0 = 不设容忍带（原版0.015）
     g.use_entry_signal_pool = False  # False=全股票池排名；True=只在涨停回落信号股+持仓里排名（原版）
+    g.use_industry = True         # False = no industry classification: no industry neutralization,
+                                  # industry flow/return factors set to 0, no LightGBM industry feature
     g.universe_mode = 'csi800'    # 'csi800'=沪深300+中证500；'sector'=原版六个行业+AI概念
     g.last_market_strength = 0.50
 
@@ -187,10 +192,21 @@ def initialize(context):
     g.pending_entry_signals = {}
     g.last_regime = 'neutral'
 
+    # ---- diagnostics ----
+    g.diag = {'rebalances': 0, 'ml_used': 0, 'ml_fallback': {}}
+    g.diag_ml_status = 'not run'
+    log.info('[DIAG] lightgbm=%s xgboost=%s backend=%s' % (
+        getattr(lgb, '__version__', None) if lgb is not None else 'NOT AVAILABLE',
+        getattr(xgb, '__version__', None) if xgb is not None else 'NOT AVAILABLE',
+        resolve_ml_backend()
+    ))
+
     log.set_level('order', 'error')
     run_daily(rebalance, time='open', reference_security=g.index)
-    log.info('%s initialized: universe=%s rebalance every %d days, model weight=%.2f, ML=%s' % (
-        g.strategy_name, g.universe_mode, g.rebalance_interval_trading_days, g.ml_blend_weight, g.use_ml_score
+    run_daily(record_diagnostics, time='close', reference_security=g.index)
+    log.info('%s initialized: universe=%s rebalance every %d days, model weight=%.2f, ML=%s, industry=%s' % (
+        g.strategy_name, g.universe_mode, g.rebalance_interval_trading_days, g.ml_blend_weight, g.use_ml_score,
+        g.use_industry
     ))
 
 
@@ -206,6 +222,7 @@ def rebalance(context):
     else:
         active_entry_signals = []
     if not should_rebalance_today(context):
+        retry_unfilled_targets(context, current_data)
         return
 
     # 唯一的个股退出来源：持仓已不在目标行业池内。
@@ -232,6 +249,7 @@ def rebalance(context):
 
     frozen = find_positions_within_tolerance(context, target_weights)
     execute_orders(context, target_weights, current_data, frozen)
+    g.current_target_weights = dict(target_weights)
 
     g.last_rebalance_date = pd.Timestamp(context.current_dt.date())
     g.last_regime = regime
@@ -240,6 +258,53 @@ def rebalance(context):
         len(target_stocks), len(new_candidates), len(rank_dropped), len(exit_stocks), len(frozen)
     ))
     log.info('目标股票：%s' % ', '.join(target_stocks))
+    log_rebalance_diagnostics(context, factor_df, target_stocks)
+
+
+# ======================= diagnostics =======================
+
+def set_ml_status(status):
+    g.diag_ml_status = status
+    if status.startswith('used'):
+        g.diag['ml_used'] += 1
+    else:
+        key = status.split(' (')[0]
+        g.diag['ml_fallback'][key] = g.diag['ml_fallback'].get(key, 0) + 1
+
+
+def portfolio_snapshot(context):
+    total = float(context.portfolio.total_value)
+    cash = float(context.portfolio.available_cash)
+    held = [s for s, p in context.portfolio.positions.items() if p.total_amount > 0]
+    return total, cash, held
+
+
+def log_rebalance_diagnostics(context, factor_df, target_stocks):
+    """One summary line per rebalance: was the model used, how invested are we, what do we hold."""
+    g.diag['rebalances'] += 1
+    total, cash, held = portfolio_snapshot(context)
+    held_set = set(held)
+    missing = [s for s in target_stocks if s not in held_set]
+    beta = np.nan
+    if factor_df is not None and 'low_beta_120' in factor_df.columns:
+        in_df = [s for s in held if s in factor_df.index]
+        if in_df:
+            beta = -float(factor_df.loc[in_df, 'low_beta_120'].mean())
+    weights = [context.portfolio.positions[s].value / total for s in held] if total > 0 else []
+    log.info('[DIAG] ML=%s | cash=%.1f%% | held=%d target=%d not_filled=%d %s | weight min=%.1f%% max=%.1f%% | '
+             'avg beta=%.2f | ML used %d/%d rebalances, fallbacks=%s' % (
+                 g.diag_ml_status, cash / total * 100.0 if total > 0 else np.nan,
+                 len(held), len(target_stocks), len(missing), ','.join(missing[:5]),
+                 min(weights) * 100.0 if weights else np.nan, max(weights) * 100.0 if weights else np.nan,
+                 beta, g.diag['ml_used'], g.diag['rebalances'], g.diag['ml_fallback']))
+
+
+def record_diagnostics(context):
+    """Daily curves on the JoinQuant chart: cash share, number of holdings, model used on last rebalance."""
+    total, cash, held = portfolio_snapshot(context)
+    record(cash_pct=cash / total * 100.0 if total > 0 else 0.0,
+           holdings=len(held),
+           ml_used=1 if str(g.diag_ml_status).startswith('used') else 0)
 
 
 def get_sleeve_weights(regime):
@@ -437,10 +502,15 @@ def build_training_sections(decision_date):
     return sections
 
 
+def use_industry_feature():
+    """LightGBM industry categorical: needs both g.ml_use_industry_feature and g.use_industry."""
+    return bool(getattr(g, 'ml_use_industry_feature', True)) and bool(getattr(g, 'use_industry', True))
+
+
 def to_model_matrix(backend, features):
     """LightGBM：12个因子 + 行业编码(类别特征)；XGBoost：只用12个因子。"""
     values = features[ml_feature_names()].values.astype(float)
-    if backend == 'lightgbm' and bool(getattr(g, 'ml_use_industry_feature', True)):
+    if backend == 'lightgbm' and use_industry_feature():
         industry_codes = encode_industry(features['industry']).values.astype(float).reshape(-1, 1)
         return np.hstack([values, industry_codes]), ml_feature_names() + ['industry_code']
     return values, ml_feature_names()
@@ -452,7 +522,7 @@ def fit_ml_model(backend, sections):
     matrix, names = to_model_matrix(backend, features)
     rounds = int(g.ml_num_rounds)
     if backend == 'lightgbm':
-        use_industry = bool(getattr(g, 'ml_use_industry_feature', True))
+        use_industry = use_industry_feature()
         dataset = lgb.Dataset(
             matrix, label=labels.values, feature_name=names,
             categorical_feature=[len(names) - 1] if use_industry else [], free_raw_data=False
@@ -493,6 +563,7 @@ def apply_ml_score(df, decision_date):
     backend = resolve_ml_backend()
     if backend is None:
         log.info('[ML] 当前环境无法 import lightgbm / xgboost，沿用线性打分')
+        set_ml_status('fallback: no model library')
         return result
 
     try:
@@ -500,6 +571,7 @@ def apply_ml_score(df, decision_date):
         min_sections = int(g.ml_min_sections)
         if len(sections) < min_sections:
             log.info('[ML] 可用历史截面只有%d个(需要%d个)，沿用线性打分' % (len(sections), min_sections))
+            set_ml_status('fallback: only %d sections' % len(sections))
             return result
 
         valid_num = max(1, int(round(len(sections) * float(g.ml_valid_ratio))))
@@ -518,15 +590,18 @@ def apply_ml_score(df, decision_date):
         use_gate = bool(getattr(g, 'ml_use_valid_gate', True))
         if use_gate and (pd.isna(valid_ic) or valid_ic < float(g.ml_min_valid_ic)):
             log.info('[ML] 验证RankIC未达到%.3f，本期不采用模型，沿用线性打分' % float(g.ml_min_valid_ic))
+            set_ml_status('fallback: validation gate')
             return result
 
         booster, total_rows = fit_ml_model(backend, sections)
         prediction = predict_ml(backend, booster, build_ml_features(result))
     except Exception as exc:
         log.info('[ML] 训练或预测失败，沿用线性打分：%s' % str(exc))
+        set_ml_status('fallback: error %s' % type(exc).__name__)
         return result
 
     blend = clip_value(g.ml_blend_weight, 0.0, 1.0)
+    set_ml_status('used (%s, %d sections, valid IC %.3f)' % (backend, len(sections), safe_float(valid_ic)))
     result['ml_score'] = prediction
     result['final_score'] = (
         blend * prediction.rank(pct=True) +
@@ -625,6 +700,8 @@ def get_factor_df(context, decision_date, current_data=None):
     df = df.dropna(subset=['final_score'])
     if bool(getattr(g, 'use_ml_score', True)):
         df = apply_ml_score(df, decision_date)
+    else:
+        set_ml_status('off (use_ml_score=False)')
     return df, getattr(g, 'last_regime', 'neutral')
 
 
@@ -1065,6 +1142,16 @@ def filter_stock_list(context, stocks, current_data=None):
 
 
 def add_industry_features(df, close_df, money_df, decision_date):
+    if not bool(getattr(g, 'use_industry', True)):
+        # One group for all stocks: industry z-scores equal market-wide z-scores, and the
+        # industry factors are set to 0 (a single group would turn them into market-wide
+        # values that only vary over time).
+        df['industry'] = 'All'
+        for col in ['industry_flow_20d', 'industry_flow_60d', 'industry_return_20d',
+                    'industry_return_60d', 'industry_preheat_confirm_score']:
+            df[col] = 0.0
+        df['industry_relative_strength_20'] = df['relative_strength_20']
+        return df
     stocks = list(df.index)
     industry_map = {}
     try:
@@ -1363,19 +1450,63 @@ def judge_market_regime(index_close, breadth, forecast_score=0.0):
     return 'neutral'
 
 
+def lot_rule(stock):
+    """(minimum shares per buy order, share increment): STAR Market 200 / 1, other A-shares 100 / 100."""
+    code = stock.split('.')[0]
+    if code.startswith('688') or code.startswith('689'):
+        return 200, 1
+    return 100, 100
+
+
+def round_to_lot(stock, shares):
+    """Round a share count to the nearest valid increment (no minimum applied)."""
+    _, step = lot_rule(stock)
+    return int(round(float(shares) / step)) * step
+
+
+def affordable_shares(stock, cash, price):
+    """Most shares a buy order can take with ``cash`` (commission included); 0 if below the minimum."""
+    min_lot, step = lot_rule(stock)
+    if cash <= 0 or price <= 0:
+        return 0
+    shares = int(cash / (price * 1.0005) / step) * step
+    return shares if shares >= min_lot else 0
+
+
 def execute_orders(context, target_weights, current_data=None, frozen=None):
+    """Trade to target weights with lot-aware sizing so the portfolio ends up fully invested.
+
+    Earlier versions rounded every target down to 100 shares and used 100 shares as the
+    minimum everywhere.  With 20 equal weights that left large cash balances (high-priced
+    stocks rounded to 0 shares, STAR Market stocks rejected below 200 shares, every other
+    position underweight).  This version:
+      1. sells holdings that are no longer targets;
+      2. sizes each target to the nearest valid lot (STAR Market: at least 200 shares,
+         increments of 1), with at least one lot unless one lot exceeds the single-stock cap;
+      3. trims overweight positions, then buys the largest shortfalls first, never spending
+         more than the available cash;
+      4. tops up leftover cash lot by lot into the most underweight targets, up to the cap.
+    """
     if current_data is None:
         current_data = get_current_data()
-    frozen = frozen or set()   # 容忍带内的持仓：本次既不减仓也不加仓
-    target_stocks = set(target_weights.keys())
-    total_value = context.portfolio.total_value
+    frozen = frozen or set()
+    total_value = float(context.portfolio.total_value)
+    cap_value = total_value * float(getattr(g, 'max_single_stock_weight', 1.0))
+    reserve = total_value * float(getattr(g, 'cash_reserve', 0.005))
+    positions = context.portfolio.positions
 
-    for stock, position in list(context.portfolio.positions.items()):
-        if position.total_amount <= 0:
-            continue
-        if stock in target_stocks:
-            continue
-        if position.closeable_amount < 100:
+    def held(stock):
+        return int(positions[stock].total_amount) if stock in positions else 0
+
+    def closeable(stock):
+        return int(positions[stock].closeable_amount) if stock in positions else 0
+
+    def spendable():
+        return float(context.portfolio.available_cash) - reserve
+
+    # 1. exit holdings that are not targets
+    for stock in list(positions.keys()):
+        if held(stock) <= 0 or stock in target_weights or closeable(stock) <= 0:
             continue
         try:
             cd = current_data[stock]
@@ -1385,7 +1516,8 @@ def execute_orders(context, target_weights, current_data=None, frozen=None):
             continue
         place_order_target(context, stock, 0, cd)
 
-    target_amount_dict = {}
+    # 2. target share counts
+    plan = {}
     for stock, weight in target_weights.items():
         if stock in frozen:
             continue
@@ -1395,29 +1527,82 @@ def execute_orders(context, target_weights, current_data=None, frozen=None):
             continue
         if not is_tradable_current_data(cd):
             continue
-        target_value = total_value * float(weight)
-        last_price = float(cd.last_price)
-        target_amount = int(target_value / last_price / 100.0) * 100
-        target_amount_dict[stock] = target_amount
-
-        if stock in context.portfolio.positions:
-            position = context.portfolio.positions[stock]
-            current_amount = int(position.total_amount)
-            closeable_amount = int(position.closeable_amount)
-        else:
-            current_amount = 0
-            closeable_amount = 0
-
-        if target_amount >= current_amount:
+        price = float(cd.last_price)
+        min_lot, step = lot_rule(stock)
+        if min_lot * price > cap_value:
+            log.info('[sizing] skip %s: one lot (%d x %.2f) exceeds the single-stock cap' % (stock, min_lot, price))
             continue
-        reduce_amount = current_amount - target_amount
-        if reduce_amount < 100 or closeable_amount < 100:
-            continue
-        final_target_amount = target_amount if closeable_amount >= reduce_amount else max(0, current_amount - int(closeable_amount / 100.0) * 100)
-        place_order_target(context, stock, final_target_amount, cd)
+        target = max(min_lot, round_to_lot(stock, total_value * float(weight) / price))
+        while target > min_lot and target * price > cap_value:
+            target -= step
+        plan[stock] = [target, price, cd]
 
-    for stock, weight in target_weights.items():
-        if stock in frozen:
+    # 3a. trim overweight positions (only shares that can be sold today)
+    for stock, (target, price, cd) in plan.items():
+        current = held(stock)
+        if target >= current:
+            continue
+        sell = min(current - target, closeable(stock))
+        if sell < current:  # partial sale: keep to the share increment
+            sell = int(sell / lot_rule(stock)[1]) * lot_rule(stock)[1]
+        if sell > 0:
+            place_order_target(context, stock, current - sell, cd)
+
+    # 3b. buy each shortfall rounded DOWN to the increment (never overshoots, within cash);
+    #     step 4 then hands out the remaining cash lot by lot, most underweight first
+    for stock, (target, price, cd) in plan.items():
+        need = target - held(stock)
+        if need <= 0:
+            continue
+        step = lot_rule(stock)[1]
+        need = min(need, int(total_value * float(target_weights[stock]) / price) - held(stock))
+        shares = min(int(need / step) * step, affordable_shares(stock, spendable(), price))
+        if shares >= lot_rule(stock)[0]:
+            place_order_target(context, stock, held(stock) + shares, cd)
+
+    # 4. deploy leftover cash one buy unit at a time into the most underweight targets (missing ones first)
+    for _ in range(10 * max(1, len(plan))):
+        cash = spendable()
+        best = None
+        for stock, (target, price, cd) in plan.items():
+            unit = lot_rule(stock)[0]  # targets not yet held are the most underweight, so they come first
+            cost = unit * price * 1.0005
+            value_after = (held(stock) + unit) * price
+            if cost > cash or value_after > cap_value:
+                continue
+            gap = held(stock) * price / total_value - float(target_weights[stock])
+            if best is None or gap < best[0]:
+                best = (gap, stock, unit, cd)
+        if best is None:
+            break
+        _, stock, unit, cd = best
+        before = held(stock)
+        place_order_target(context, stock, before + unit, cd)
+        if held(stock) <= before:  # order rejected: stop instead of looping
+            break
+
+
+def retry_unfilled_targets(context, current_data):
+    """Runs every day between rebalances.
+
+    On a rebalance day some trades fail because the stock opens limit-up, limit-down or is
+    suspended.  Without a retry the cash (or the stock that should have been sold) waits up
+    to 20 trading days for the next rebalance.  This function:
+      1. sells holdings that are no longer targets once they become tradable;
+      2. if cash is above g.retry_cash_threshold, buys targets that are still not held,
+         sized to their target weight (lot rules and cash limits as in execute_orders).
+    Existing positions are not resized here, so the portfolio does not churn between rebalances.
+    """
+    weights = dict(getattr(g, 'current_target_weights', {}) or {})
+    total = float(context.portfolio.total_value)
+    if not weights or total <= 0:
+        return
+    positions = context.portfolio.positions
+    sold, bought = [], []
+
+    for stock in list(positions.keys()):
+        position = positions[stock]
+        if position.total_amount <= 0 or stock in weights or position.closeable_amount <= 0:
             continue
         try:
             cd = current_data[stock]
@@ -1425,15 +1610,37 @@ def execute_orders(context, target_weights, current_data=None, frozen=None):
             continue
         if not is_tradable_current_data(cd):
             continue
+        place_order_target(context, stock, 0, cd)
+        sold.append(stock)
 
-        target_amount = target_amount_dict.get(stock, 0)
-        if target_amount < 100:
-            continue
-        current_amount = int(context.portfolio.positions[stock].total_amount) if stock in context.portfolio.positions else 0
-        delta_amount = target_amount - current_amount
-        if delta_amount < 100:
-            continue
-        place_order_target(context, stock, target_amount, cd)
+    missing = [s for s, w in weights.items()
+               if float(w) > 0 and (s not in positions or positions[s].total_amount <= 0)]
+    cash = float(context.portfolio.available_cash)
+    if missing and cash / total >= float(getattr(g, 'retry_cash_threshold', 0.03)):
+        cap_value = total * float(getattr(g, 'max_single_stock_weight', 1.0))
+        reserve = total * float(getattr(g, 'cash_reserve', 0.005))
+        for stock in missing:
+            try:
+                cd = current_data[stock]
+            except Exception:
+                continue
+            if not is_tradable_current_data(cd):
+                continue
+            price = float(cd.last_price)
+            min_lot, step = lot_rule(stock)
+            if min_lot * price > cap_value:
+                continue
+            shares = max(min_lot, int(min(total * float(weights[stock]), cap_value) / price / step) * step)
+            shares = min(shares, affordable_shares(stock, float(context.portfolio.available_cash) - reserve, price))
+            if shares >= min_lot:
+                place_order_target(context, stock, shares, cd)
+                bought.append(stock)
+
+    if sold or bought:
+        still_missing = [s for s in missing if s not in bought]
+        log.info('[retry] sold leftovers=%d %s | bought missing targets=%d %s | still missing=%d | cash=%.1f%%' % (
+            len(sold), ','.join(sold[:5]), len(bought), ','.join(bought[:5]), len(still_missing),
+            float(context.portfolio.available_cash) / total * 100.0))
 
 
 def is_tradable_current_data(cd):
