@@ -254,6 +254,11 @@ class Data:
         bal = point_in_time(self.balance, date, ["debt_to_asset"])
         df["roe"] = fund["roe"].reindex(df.index)
         df["debt_to_asset"] = bal["debt_to_asset"].reindex(df.index)
+        # single-quarter net profit, quarter-on-quarter growth (%). Eastmoney leaves it blank in many
+        # half-year and annual files, so take each stock's latest non-blank value announced in the
+        # last 270 days. Percentile rank: growth on a near-zero base reaches +/- millions of percent.
+        qoq = self.fund.dropna(subset=["profit_qoq"])
+        df["profit_qoq"] = point_in_time(qoq, date, ["profit_qoq"])["profit_qoq"].reindex(df.index).rank(pct=True)
 
         now = close_df.iloc[-1]
         ret = close_df.pct_change()

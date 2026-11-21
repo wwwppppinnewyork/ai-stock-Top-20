@@ -59,6 +59,8 @@ src/open_data.py            Free-data panel (BaoStock + AkShare) for running the
 src/jq_port_backtest.py     Local port of the JoinQuant 12-factor + LightGBM strategy (see joinquant_lightgbm/)
 src/timing_tests.py         Rebalance-timing tests for the LightGBM strategy (results/timing_tests.md)
 src/beta_tests.py           Beta-constrained portfolio weights with a no-model control (results/beta_tests.md)
+src/factor_horizon_ic.py    Single-factor Rank IC at 20 / 60 / 120 days (results/factor_horizon_ic.md)
+src/split_test.py           Out-of-sample test of slow factors chosen on pre-2023 data (results/split_test.md)
 src/backfill_top20_history.py, backtest_*.py, top20_history.py   History backfill and backtests
 ```
 
@@ -199,3 +201,52 @@ All 20 offsets combined as equal-capital staggered sleeves, 2019-11 to 2025-12, 
   (median 0.45 against 0.22).
 - **What is left for the model is small.** With beta near the market's, the model's portfolios earn
   a Sharpe ratio of about 0.46 against 0.37 for the index.
+
+## Slow and fast factors
+
+The idea tested: financial and valuation factors describe the slow, long-horizon trend, momentum
+the medium-horizon trend. `src/factor_horizon_ic.py` measures single-factor Rank IC at 20, 60 and
+120 trading days on 66 cross-sections, 2020-02 to 2025-06. Full table:
+[`results/factor_horizon_ic.md`](results/factor_horizon_ic.md).
+
+| Factor | IC 20d | IC 60d | IC 120d |
+|---|---|---|---|
+| Book-to-price (BP) | 0.056 | 0.089 | 0.128 |
+| Sales-to-price (SP) | 0.036 | 0.055 | 0.083 |
+| Earnings yield (EP) | 0.046 | 0.054 | 0.066 |
+| Operating cash flow / EPS | 0.019 | 0.029 | 0.038 |
+| Low asset growth | 0.017 | 0.036 | 0.057 |
+| Revenue growth, YoY | -0.023 | -0.053 | -0.084 |
+| ROE | -0.009 | -0.034 | -0.059 |
+| Net profit growth, QoQ | -0.007 | -0.011 | -0.022 |
+| 60-day return | -0.043 | -0.035 | -0.004 |
+| 12-1 month momentum | 0.032 | 0.032 | 0.035 |
+
+- **Fundamental factors are slow**: their IC grows with the horizon. But in 2020-2025 growth and
+  profitability worked with the opposite sign; what paid was cheapness (BP strongest), cash earnings
+  quality and low asset growth.
+- **Medium-horizon "momentum" is reversal in A-shares.** 20- and 60-day winners lagged; only 12-1
+  month momentum was positive.
+- **Adding QoQ net profit growth to the model changed nothing** (all 20 offsets combined: Sharpe 0.49
+  against 0.47; [`results/profit_qoq_test.md`](results/profit_qoq_test.md)).
+
+### Out-of-sample check
+
+Choosing factors on the full-sample IC table and backtesting on the same years would overstate
+the result. `src/split_test.py` chooses on 2020-02 to 2022-09 only (every 60-day window ends
+before 2023): factors not already in the model with |60-day IC| >= 0.03, which gives SP, BP and
+YoY net profit growth. Same data, costs and 20 offsets for both models. Full output:
+[`results/split_test.md`](results/split_test.md).
+
+| Period | Model | Sharpe (min / median / max) | All offsets combined: return / Sharpe / max DD | Offsets improved |
+|---|---|---|---|---|
+| 2020-2022 (selection) | Baseline | -0.36 / 0.40 / 1.30 | 8.1% / 0.45 / -36.8% | |
+| 2020-2022 (selection) | + SP, BP, profit YoY | -0.11 / 0.48 / 1.50 | 11.5% / 0.57 / -40.6% | 16 / 20 |
+| 2023-2025 (out of sample) | Baseline | -0.20 / 0.37 / 0.94 | 6.8% / 0.49 / -21.1% | |
+| 2023-2025 (out of sample) | + SP, BP, profit YoY | -0.05 / 0.45 / 1.12 | 7.7% / 0.54 / -19.9% | 11 / 20 |
+| 2023-2025 | CSI All Share index | | 7.4% / 0.46 / -29.4% | |
+
+The improvement shrinks out of sample, from 16 of 20 offsets to 11 of 20, which is close to a coin
+flip. The direction is right, but three years are not enough to separate it from noise. Out of
+sample the baseline model also barely beats the index on a risk-adjusted basis, which is the
+larger problem.

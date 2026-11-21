@@ -29,7 +29,12 @@ jq.P["industry_feature"] = False
 # bit-for-bit reproducible LightGBM: without this, thread scheduling changes the trees slightly,
 # which is enough to change the top-20 picks and move an offset's annual return by several points
 jq.LGB_PARAMS.update(deterministic=True, force_row_wise=True)
-OUT = jq.OUT.parent / "timing_tests"
+# optional extra model factors, e.g. ``python src/timing_tests.py --extra profit_qoq --only-offsets``
+EXTRA = sys.argv[sys.argv.index("--extra") + 1].split(",") if "--extra" in sys.argv else []
+for _col in EXTRA:
+    jq.LITE_FACTORS.append((_col, "all", {}))   # weight 0 in the linear score, used only by LightGBM
+    jq.FEATURES.append(_col)
+OUT = jq.OUT.parent / ("timing_tests" + "".join(f"_{c}" for c in EXTRA))
 TRAIN_DAYS = 360          # training window: 18 cross-sections x 20 days, as in the original
 TOP = jq.P["target_num"]
 BUY, SELL = jq.P["buy_cost"], jq.P["sell_cost"]
@@ -170,6 +175,29 @@ def main():
         rows.append({"offset": k, **st})
     offsets = pd.DataFrame(rows)
     offsets.to_csv(OUT / "offsets.csv", index=False)
+    if "--only-offsets" in sys.argv:
+        comb, _ = stats(combine(list(navs20.values()), start, end))
+        ic20 = []
+        for d, pred in preds.items():
+            e = pos[d] + 1
+            if e + 20 < len(days):
+                fwd = close.loc[days[e + 20], pred.index] / close.loc[days[e], pred.index] - 1
+                row = {"model": jq.rank_ic(pred, fwd)}
+                for c in EXTRA:
+                    row[c] = jq.rank_ic(feats[d][c].reindex(pred.index), fwd)
+                ic20.append(row)
+        ic20 = pd.DataFrame(ic20).mean()
+        pct = lambda x: f"{x * 100:.1f}%"  # noqa: E731
+        q = offsets.quantile([0, 0.5, 1])
+        lines = [f"# 20 start offsets with extra factors {EXTRA}, {start.date()} to {end.date()}", "",
+                 f"- Ann. return min / median / max: {pct(q.ann_return[0])} / {pct(q.ann_return[0.5])} / {pct(q.ann_return[1])}",
+                 f"- Sharpe min / median / max: {q.sharpe[0]:.2f} / {q.sharpe[0.5]:.2f} / {q.sharpe[1]:.2f}",
+                 f"- Max drawdown median: {pct(q.max_dd[0.5])}",
+                 f"- All 20 offsets combined: {pct(comb['ann_return'])}, Sharpe {comb['sharpe']:.2f}, max DD {pct(comb['max_dd'])}",
+                 "- Mean 20-day Rank IC: " + ", ".join(f"{k} {v:.3f}" for k, v in ic20.items())]
+        (OUT / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("\n".join(lines))
+        return
 
     # B. signal decay: IC of the score vs forward returns from the trade day
     ic_rows = []
