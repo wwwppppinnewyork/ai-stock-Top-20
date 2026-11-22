@@ -61,6 +61,8 @@ src/timing_tests.py         Rebalance-timing tests for the LightGBM strategy (re
 src/beta_tests.py           Beta-constrained portfolio weights with a no-model control (results/beta_tests.md)
 src/factor_horizon_ic.py    Single-factor Rank IC at 20 / 60 / 120 days (results/factor_horizon_ic.md)
 src/split_test.py           Out-of-sample test of slow factors chosen on pre-2023 data (results/split_test.md)
+src/factor_ic_by_year.py    Yearly IC / ICIR of each model factor (results/factor_ic_by_year.md)
+src/deflated_sharpe.py      Deflated Sharpe ratios for the backtests (results/deflated_sharpe.md)
 src/backfill_top20_history.py, backtest_*.py, top20_history.py   History backfill and backtests
 ```
 
@@ -250,3 +252,56 @@ The improvement shrinks out of sample, from 16 of 20 offsets to 11 of 20, which 
 flip. The direction is right, but three years are not enough to separate it from noise. Out of
 sample the baseline model also barely beats the index on a risk-adjusted basis, which is the
 larger problem.
+
+## Which model factors broke, and when
+
+`src/factor_ic_by_year.py`: daily 20-day Rank IC of each model input, by calendar year
+(2019 is October to December only). Full tables with ICIR:
+[`results/factor_ic_by_year.md`](results/factor_ic_by_year.md).
+
+| Factor | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 |
+|---|---|---|---|---|---|---|---|
+| 20-day relative strength | -0.045 | -0.000 | -0.037 | -0.079 | -0.008 | -0.017 | -0.051 |
+| 60-day MA slope | -0.001 | 0.034 | -0.091 | -0.075 | 0.006 | -0.026 | -0.042 |
+| 120-day alpha | 0.030 | 0.069 | -0.040 | -0.105 | 0.026 | -0.003 | -0.047 |
+| 20-day turnover value (log) | 0.026 | 0.036 | -0.119 | -0.087 | -0.114 | -0.005 | -0.015 |
+| ROE | 0.038 | 0.048 | -0.027 | -0.026 | -0.051 | -0.013 | -0.007 |
+| Limit-up count, 10 days | -0.068 | -0.030 | -0.031 | -0.039 | -0.032 | -0.038 | -0.046 |
+| Low beta, 120 days | 0.018 | -0.006 | 0.061 | 0.019 | 0.124 | 0.065 | -0.073 |
+| **Model score** | 0.005 | 0.087 | 0.038 | 0.027 | 0.064 | 0.045 | -0.037 |
+
+- The factor set was built for the 2019-2020 large-cap trend market. After the 2021 style shift
+  most inputs turned negative and stayed there.
+- Only two inputs kept their sign: limit-up count (negative every year) and low beta (positive in
+  five of seven years).
+- LightGBM, retrained on a trailing window, learns to flip signs, which is why the model score's IC
+  stayed positive in five of six full years. It lags regime changes: in 2025 low beta flipped and
+  the model score turned negative.
+- Flipping signs on trailing IC by hand does not fix this. With a 3-month window it does worse than
+  not flipping (20-day IC is negatively autocorrelated for the trend factors); with 12 to 18 months
+  it turns an average IC of -0.019 into +0.019, with the sign right 55-56% of the time.
+
+## Deflated Sharpe ratios
+
+Every variant tried raises the Sharpe ratio the best one shows by luck. `src/deflated_sharpe.py`
+computes the probabilistic and deflated Sharpe ratios (Bailey and Lopez de Prado, 2014) over the 80
+offset-level backtests of the beta tests, 2019-11 to 2025-12. Full output:
+[`results/deflated_sharpe.md`](results/deflated_sharpe.md).
+
+| Portfolio | Sharpe | PSR (SR > 0) | DSR, N = 2 (effective) | DSR, N = 141 (all variants run) |
+|---|---|---|---|---|
+| Equal weight top 20, 20 offsets combined | 0.47 | 0.87 | 0.82 | 0.47 |
+| Max score, beta <= 0.7 | 0.46 | 0.87 | 0.81 | 0.46 |
+| Min beta within the model's top 100 | 0.75 | 0.96 | 0.94 | 0.72 |
+| Control: min beta, whole universe | 0.74 | 0.96 | 0.94 | 0.71 |
+| Best single backtest (min beta, offset 3) | 0.91 | 0.99 | 0.97 | 0.84 |
+| CSI All Share index | 0.37 | 0.81 | 0.74 | 0.37 |
+
+- The 80 backtests are highly correlated: the participation ratio of their correlation matrix gives
+  about 2 independent trials (3.3 after removing market exposure). N = 141 counts every variant run
+  across these tests and is an upper bound. With N = 141, pure noise would produce a best Sharpe
+  ratio of 0.50 by luck.
+- The model strategy is not significant even before deflation (PSR 0.87).
+- Only the low-beta portfolios clear 0.95, and only at small N. The best single backtest (0.91)
+  falls to a DSR of 0.84 at N = 141.
+- Returns are negatively skewed with kurtosis of 7 to 8, which the DSR accounts for.
